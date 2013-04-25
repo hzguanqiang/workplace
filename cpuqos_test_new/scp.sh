@@ -14,9 +14,9 @@ test_32=`grep test_32= $ipList | awk -F '=' '{print $2}'`
 ips=($test_1 $test_2 $test_4 $test_6 $test_8 $test_12 $test_16 $test_24 $test_32)
 key=new_id_rsa
 #files=.ssh
+#dest=/root/
 files=script_and_config_for_vm/*
 dest=/root/cpu2006/
-#dest=/root/
 
 for ip in ${ips[@]}
 do
