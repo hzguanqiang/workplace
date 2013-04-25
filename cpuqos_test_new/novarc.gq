@@ -1,0 +1,5 @@
+export ADMIN_TOKEN=ADMINTOKEN
+export OS_USERNAME=opstest
+export OS_PASSWORD=ops123456
+export OS_TENANT_NAME=Project_opstest
+export OS_AUTH_URL=http://10.120.202.202:5000/v2.0/
