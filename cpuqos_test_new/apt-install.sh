@@ -19,5 +19,5 @@ for ip in ${ips[@]}
 do
     echo configure $ip:
     ssh -p${port} -i ${key} root@${ip} "hostname"
-    ssh -p${port} -i ${key} root@${ip} "hostname; apt-get update; apt-get install -y  --force-yes numactl gcc g++ gfortran make; dpkg -l|grep numactl; dpkg -l|grep gcc; dpkg -l|grep g++; dpkg -l|grep gfortran; dpkg -l|grep make"
+    ssh -p${port} -i ${key} root@${ip} "hostname; apt-get install -y  --force-yes numactl gcc g++ gfortran make; dpkg -l|grep numactl; dpkg -l|grep gcc; dpkg -l|grep g++; dpkg -l|grep gfortran; dpkg -l|grep make"
 done
