@@ -10,7 +10,7 @@ sed -i "s/'}//g" format_flavor
 
 #sort -r -t"," -n -k1 format_flavor > new_flavor_add_from_db
 
-echo id,name,mem,disk,ephr,vcpu,ecu > flavor_list
+echo id,name,mem,disk,ephemeral_disk,vcpu,ecu > flavor_list
 sort -t"," -n -k1 format_flavor >> flavor_list
 
 diff=`diff flavor_list add_flavor_list`

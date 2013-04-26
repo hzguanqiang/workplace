@@ -1,10 +1,14 @@
 #!/bin/bash
 ecus=(1 2 4 6 8 12 16 24 32)
 mems=(512 1024 2048 4096 6144 8192 12288 16384 24576 32768)
-ephers=(0 10 20 30 40 60 80 120 160 200)
+ephemeral_disks=(0 10 20 30 40 60 80 120 160 200)
 local_disk=20
 id=1
-flavor_id=29  #flavor_init_id
+flavor_id=`nova flavor-list | grep ecus | awk '{print $2}' | sort | tail -n1`
+flavor_id=`expr $flavor_id + 1`
+
+echo id,name,mem,disk,ephemeral_disk,vcpu,ecu > add_flavor_list
+
 for ecu in ${ecus[@]}
 do
     case $ecu in
@@ -29,7 +33,7 @@ do
     esac
     for mem in ${mems[@]}
     do
-        for epher in ${ephers[@]}
+        for ephemeral_disk in ${ephemeral_disks[@]}
         do
             ecus_per_128Mmem=`expr $ecu \* 8192 / $mem`
             if [ "$ecus_per_128Mmem" -lt "1" -o "$ecus_per_128Mmem" -gt "64" ]
@@ -37,9 +41,9 @@ do
                 continue
             fi
 
-            echo ${flavor_id},flavor_${id},${mem},20,${epher},${vcpu},${ecus_per_vcpu} >> add_flavor_list
-            echo nova flavor-create flavor_${id} $flavor_id $mem $local_disk $vcpu --ephemeral $epher
-            nova flavor-create flavor_${id} $flavor_id $mem $local_disk $vcpu --ephemeral $epher
+            echo ${flavor_id},flavor_${id},${mem},20,${ephemeral_disk},${vcpu},${ecus_per_vcpu} >> add_flavor_list
+            echo nova flavor-create flavor_${id} $flavor_id $mem $local_disk $vcpu --ephemeral $ephemeral_disk
+            nova flavor-create flavor_${id} $flavor_id $mem $local_disk $vcpu --ephemeral $ephemeral_disk
             echo nova-manage flavor set_key --name flavor_${id} --key ecus_per_vcpu: --value $ecus_per_vcpu
             nova-manage flavor set_key --name flavor_${id} --key ecus_per_vcpu: --value $ecus_per_vcpu
             echo
