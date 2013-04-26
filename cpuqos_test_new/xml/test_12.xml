@@ -1,7 +1,7 @@
 <domain type="kvm">
   <uuid>a484a47b-8aa9-4df7-85ea-6e4cfa140ab2</uuid>
   <name>test_12</name>
-  <memory unit="GiB">4</memory>
+  <memory unit="GiB">6</memory>
   <vcpu cpuset="4-23">4</vcpu>
   <cputune>
     <shares>12288</shares>
