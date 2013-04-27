@@ -5,6 +5,10 @@ ephemeral_disks=(0 10 20 30 40 60 80 120 160 200)
 local_disk=20
 id=1
 flavor_id=`nova flavor-list | grep ecus | awk '{print $2}' | sort | tail -n1`
+if [ "${flavor_id}s" == "s" ]
+then
+    flavor_id=0
+fi
 flavor_id=`expr $flavor_id + 1`
 
 echo id,name,mem,disk,ephemeral_disk,vcpu,ecu > add_flavor_list
