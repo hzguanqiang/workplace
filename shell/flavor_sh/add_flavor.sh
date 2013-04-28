@@ -4,7 +4,7 @@ mems=(512 1024 2048 4096 6144 8192 12288 16384 24576 32768)
 ephemeral_disks=(0 10 20 30 40 60 80 120 160 200)
 local_disk=20
 id=1
-flavor_id=`nova flavor-list | grep ecus | awk '{print $2}' | sort | tail -n1`
+flavor_id=`nova flavor-list | grep ecus | awk '{print $2}' | sort -n | tail -n1`
 if [ "${flavor_id}s" == "s" ]
 then
     flavor_id=0
