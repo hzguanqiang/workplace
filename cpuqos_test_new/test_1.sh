@@ -14,7 +14,7 @@ nohup ./start_pressure.sh 6 1 &
 
 while (true)
 do
-  result=`./check_finish.sh 2`
+  result=`./check_finish.sh 1`
   echo $result
 
   ok=`echo $result| grep "runspec finished at"`
