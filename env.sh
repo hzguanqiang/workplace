@@ -21,3 +21,5 @@ then
 else
     echo $cmd >> ~/.bashrc
 fi
+
+echo 'alias ll="ls -l"' >> ~/.bashrc
