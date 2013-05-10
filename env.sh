@@ -1,20 +1,17 @@
 #!/bin/bash
-if [ -e ~/.bashrc ]
+if [ -e ~/.bashrc_profile ]
 then 
-    echo ~/.bashrc exist!
+    echo ~/.bashrc_profile exist!
 else
   ln -s ~/.bashrc ~/.bash_profile
 fi
-pwd=`pwd`
-echo $pwd
 
-#cmd=`echo "\$"a alias dev=\"cd ${pwd}\"`
+
+pwd=`pwd`
 cmd='alias dev="cd '${pwd}\"
 echo $cmd
 
 dev=`grep "alias dev" ~/.bashrc`
-echo $dev
-
 if [ "${dev}s" != "s" ]
 then
     echo alias dev has been used!
@@ -23,3 +20,6 @@ else
 fi
 
 echo 'alias ll="ls -l"' >> ~/.bashrc
+echo 'alias vi="vim"' >> ~/.bashrc
+echo 'export PAGER=less' >> ~/.bashrc
+source ~/.bashrc
