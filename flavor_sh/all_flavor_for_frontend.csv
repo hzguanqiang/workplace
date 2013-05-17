@@ -1,0 +1,6 @@
+name,id,memory_mb,vcpus,swap,vcpu_weight,flavorid,rxtx_factor,root_gb,ephemeral_gb,disable,is_public,ecus_per_cpu
+f1,,512,1,0,null,1,1.0,20,0,0,public,1
+f2,,512,1,0,null,2,1.0,20,10,0,public,1
+f3,,512,1,0,null,3,1.0,20,20,0,public,1
+f4,,512,1,0,null,4,1.0,20,30,0,public,1
+test,,20,2,0,null,5,1.0,20,0,0,private,
