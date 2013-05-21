@@ -1,5 +1,5 @@
 #!/bin/bash
-port=22
+port=1046
 ipList=./ipList
 test_1=`grep test_1= $ipList | awk -F '=' '{print $2}'`
 test_2=`grep test_2= $ipList | awk -F '=' '{print $2}'`

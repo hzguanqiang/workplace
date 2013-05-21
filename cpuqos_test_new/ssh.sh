@@ -1,5 +1,5 @@
 #!/bin/bash
-port=22
+port=1046
 if [ "$#" != "1" ]
 then
    echo "please input the ecu_nums as argument"

@@ -1,5 +1,5 @@
 #!/bin/bash
-port=22
+port=1046
 pkill check_finish.sh
 pkill cpu_rate.sh  
 pkill env.sh  

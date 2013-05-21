@@ -1,11 +1,12 @@
 #!/bin/bash
-port=22
+port=1046
 
 name=test_32
 
 nohup ./start_test.sh 32 &
 nohup ./cpu_rate.sh $name &
 
+sleep 30
 while (true)
 do
   result=`./check_finish.sh 32`

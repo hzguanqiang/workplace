@@ -1,5 +1,5 @@
 #!/bin/bash
-port=22
+port=1046
 
 name=test_2
 
@@ -13,6 +13,7 @@ nohup ./start_pressure.sh 8 1 &
 nohup ./start_pressure.sh 6 1 &
 nohup ./start_pressure.sh 4 1 &
 
+sleep 30
 while (true)
 do
   result=`./check_finish.sh 2`
