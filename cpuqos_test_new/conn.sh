@@ -20,7 +20,7 @@ dest=/root/
 for ip in ${ips[@]}
 do
     echo configure $ip:
-    ssh -p${port} -i ${key} root@${ip} "hostname"
+    ssh -p${port} -i ${key} root@${ip} "hostname; df -hl /"
 done
 
 
