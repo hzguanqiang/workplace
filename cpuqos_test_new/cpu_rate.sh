@@ -1,5 +1,5 @@
 #!/bin/bash
-port=22
+port=1046
 name=$1
 interval=3
 cpu_num=`cat /proc/stat | grep cpu[0-9] -c`

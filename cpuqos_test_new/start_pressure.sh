@@ -1,5 +1,5 @@
 #!/bin/bash
-port=22
+port=1046
 if [ "$#" != "2" ]
 then
    echo "please input the ecu_nums and copy_nums as argument"
