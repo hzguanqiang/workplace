@@ -15,6 +15,6 @@ pkill runspec
 
 while (true)
 do
-    echo runspec --action clean --rate=${cfg} --iterations=1 --config=${cfg}.cfg 401 403 429 464 473 483 482
-    runspec --action clean --rate=${cfg} --iterations=1 --config=${cfg}.cfg 401 403 429 464 473 483 482
+    echo runspec --rate=${cfg} --iterations=1 --config=${cfg}.cfg 401 403 429 464 473 483 482
+    runspec --rate=${cfg} --iterations=1 --config=${cfg}.cfg 401 403 429 464 473 483 482
 done
