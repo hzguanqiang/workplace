@@ -1,5 +1,5 @@
 #!/bin/bash
-port=22
+port=1046
 ipList=./ipList
 test_1=`grep test_1= $ipList | awk -F '=' '{print $2}'`
 test_2=`grep test_2= $ipList | awk -F '=' '{print $2}'`
@@ -20,7 +20,7 @@ dest=/root/
 for ip in ${ips[@]}
 do
     echo configure $ip:
-    ssh -p${port} -i ${key} root@${ip} "hostname; df -hl /"
+    ssh -p${port} -i ${key} root@${ip} "hostname; df -hl /; rm -Rf /root/cpu2006/benchspec/C*/*/exe; rm -Rf /root/cpu2006/benchspec/C*/*/run; df -hl /"
 done
 
 

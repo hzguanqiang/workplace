@@ -22,6 +22,8 @@ echo $start_time
     echo $start_time
     echo $finish_time
     echo result: int: ${cint_score} float: ${cfp_score}
+    rm -Rf /root/cpu2006/benchspec/C*/*/exe
+    rm -Rf /root/cpu2006/benchspec/C*/*/run
     break
   else
     echo $start_time
