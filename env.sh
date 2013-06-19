@@ -22,4 +22,7 @@ fi
 echo 'alias ll="ls -l"' >> ~/.bashrc
 echo 'alias vi="vim"' >> ~/.bashrc
 echo 'export PAGER=less' >> ~/.bashrc
+echo 'alias p="ps -ef|grep "' >> ~/.bashrc
+echo 'alias k="sudo pkill "' >> ~/.bashrc
+
 source ~/.bashrc
