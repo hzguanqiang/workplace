@@ -18,7 +18,8 @@ then
 else
     echo $dir not exist!
     cp -rf vimrc ~/
-    bash ~/vimrc/install.sh
+    ln -s ~/vimrc/vim ~/.vim
+    ln -s ~/vimrc/vimrc ~/.vimrc
 fi
 
 cp tmux/.tmux.conf ~/
