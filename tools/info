@@ -1,0 +1,1 @@
+{"service":"openstack","ori_user":"2d19cc0944bb453db02e19b1df5ecfc7","resource_type":"lxc","resource_id":"lxc-devstack","aggregation_items":{},"accessKey":"d95c65a1193d483bb451a756e9a86acc","accessSecret":"4db325f027d34feebdf333335502754a","monitorWebServerUrl":"http://114.113.199.219:8181"}
