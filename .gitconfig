@@ -40,3 +40,7 @@
 [push]
     default = current
 
+[http]
+	proxy = 127.0.0.1:8087
+	sslVerify = false
+	sslCAInfo = ../goagent-goagent-842b4c9/local/CA.crt
