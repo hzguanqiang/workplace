@@ -36,6 +36,8 @@
     diff = auto
     interactive =auto
     status = auto
+[core]
+    editor = vim
 
 [push]
     default = current
