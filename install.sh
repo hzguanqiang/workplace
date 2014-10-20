@@ -9,6 +9,8 @@ cp -rf ./ssh_key/new_id_rsa.pub ~/.ssh/id_rsa.pub
 chmod 600 ~/.ssh/id_rsa*                                                           
 echo ssh configure finished!
 
+cp -rf .gitconfig ~/
+cp -rf .inputrc ~/
 
 echo begin to configure vim....
 dir=~/vimrc
