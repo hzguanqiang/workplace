@@ -1,0 +1,1 @@
+mv config ~/.ssh/
