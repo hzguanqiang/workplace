@@ -1,2 +1,2 @@
 mkdir -p ~/.pip
-cp -rf pip.conf ~/.pip
+cp -rf .pip/pip.conf ~/.pip
