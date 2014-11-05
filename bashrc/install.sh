@@ -1,8 +1,9 @@
 #!/bin/bash
 
 if [[ -e ~/.bashrc ]]; then
-    mv ~/.bashrc ~/.bashrc.bak
-    cp -rf .bashrc ~/
+    cp ~/.bashrc ~/.bashrc.bak
+    #cp -rf .bashrc ~/
+    echo "export EDITOR=vim" >> ~/.bashrc
 else
     cp -rf .bashrc ~/
 fi
