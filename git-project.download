@@ -1,2 +1,3 @@
 git clone git://github.com/robbyrussell/oh-my-zsh.git
 git clone https://github.com/joelthelion/autojump.git
+git clone ssh://hzguanqiang@scm.cloud.netease.com:2222/openstack/devstack.git ~/github/devstack.ntse

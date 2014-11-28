@@ -1,0 +1,1 @@
+sudo aptitude install libvirt-bin python-libvirt vim git exuberant-ctags zsh tmux 
