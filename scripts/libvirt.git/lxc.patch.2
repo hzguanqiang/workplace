@@ -1,0 +1,143 @@
+commit 0f5188cfe6c6708eab0acc81102fff59acc95ff6
+Author: Guan Qiang <hzguanqiang@gmail.com>
+Date:   Thu Sep 12 12:28:06 2013 +0000
+
+    Implement the RPC protocol for domainLxcEnterNamespace interface
+    
+    Just a draft.
+
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 6ace7af..2392d39 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -4623,6 +4623,54 @@ cleanup:
+ }
+ 
+ static int
++lxcDispatchDomainEnterNamespace(virNetServerPtr server ATTRIBUTE_UNUSED,
++                                virNetServerClientPtr client ATTRIBUTE_UNUSED,
++                                virNetMessagePtr msg ATTRIBUTE_UNUSED,
++                                virNetMessageErrorPtr rerr,
++                                lxc_domain_enter_namespace_args *args)
++{
++    int rv = -1;
++    struct daemonClientPrivate *priv =
++        virNetServerClientGetPrivateData(client);
++    virDomainPtr dom = NULL;
++    unsigned int nfdlist;
++    int *fdlist = NULL;
++    unsigned int noldfdlist = NULL;
++    int *oldfdlist = NULL;
++    unsigned int flags;
++    int ret;
++
++    nfdlist = args->nfdlist;
++    fdlist = args->fdlist;
++    flags = args->flags;
++
++    if (!priv->conn) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("connection not open"));
++        goto cleanup;
++    }
++
++    if (!(dom = get_nonnull_domain(priv->conn, args->dom)))
++        goto cleanup;
++
++    ret = virDomainLxcEnterNamespace(dom,
++                                     nfdlist,
++                                     fdlist,
++                                     &noldfdlist,
++                                     &oldfdlist,
++                                     flags);
++    if (ret < 0)
++        goto cleanup;
++
++    rv = 0;
++
++cleanup:
++    if (rv < 0)
++        virNetMessageSaveError(rerr);
++    virDomainFree(dom);
++    return rv;
++}
++
++static int
+ remoteDispatchDomainGetJobStats(virNetServerPtr server ATTRIBUTE_UNUSED,
+                                 virNetServerClientPtr client,
+                                 virNetMessagePtr msg ATTRIBUTE_UNUSED,
+diff --git a/src/lxc_protocol-structs b/src/lxc_protocol-structs
+index eb54172..1f83869 100644
+--- a/src/lxc_protocol-structs
++++ b/src/lxc_protocol-structs
+@@ -8,6 +8,15 @@ struct lxc_domain_open_namespace_args {
+         remote_nonnull_domain      dom;
+         u_int                      flags;
+ };
++struct lxc_domain_enter_namespace_args {
++        remote_nonnull_domain      dom;
++        struct {
++                u_int              fdlist_len;
++                int *              fdlist_val;
++        } fdlist;
++        u_int                      flags;
++};
+ enum lxc_procedure {
+         LXC_PROC_DOMAIN_OPEN_NAMESPACE = 1,
++        LXC_PROC_DOMAIN_ENTER_NAMESPACE = 1,
+ };
+diff --git a/src/remote/.remote_driver.c.swp b/src/remote/.remote_driver.c.swp
+new file mode 100644
+index 0000000..5c26b9d
+Binary files /dev/null and b/src/remote/.remote_driver.c.swp differ
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 62e77a5..6e23455 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -6048,6 +6048,39 @@ done:
+ }
+ 
+ static int
++remoteDomainLxcEnterNamespace(virDomainPtr domain,
++                              unsigned int nfdlist,
++                              int *fdlist,
++                              unsigned int *noldfdlist,
++                              int **oldfdlist,
++                              unsigned int flags)
++{
++    int rv = -1;
++    lxc_domain_enter_namespace_args args;
++    struct private_data *priv = domain->conn->privateData;
++
++    remoteDriverLock(priv);
++
++    make_nonnull_domain(&args.dom, domain);
++    args.
++    args.flags = flags;
++
++    if (callFull(domain->conn, priv, REMOTE_CALL_LXC,
++                 NULL, 0,
++                 fdlist, &nfds,
++                 LXC_PROC_DOMAIN_ENTER_NAMESPACE,
++                 (xdrproc_t) xdr_lxc_domain_enter_namespace_args, (char *) &args,
++                 (xdrproc_t) xdr_void, NULL) == -1)
++        goto done;
++
++    rv = 0;
++
++done:
++    remoteDriverUnlock(priv);
++    return rv;
++}
++
++static int
+ remoteDomainGetJobStats(virDomainPtr domain,
+                         int *type,
+                         virTypedParameterPtr *params,
+@@ -6927,6 +6960,7 @@ static virDriver remote_driver = {
+     .nodeGetCPUMap = remoteNodeGetCPUMap, /* 1.0.0 */
+     .domainFSTrim = remoteDomainFSTrim, /* 1.0.1 */
+     .domainLxcOpenNamespace = remoteDomainLxcOpenNamespace, /* 1.0.2 */
++    .domainLxcEnterNamespace = remoteDomainLxcEnterNamespace, /* 1.1.3 */
+     .domainMigrateBegin3Params = remoteDomainMigrateBegin3Params, /* 1.1.0 */
+     .domainMigratePrepare3Params = remoteDomainMigratePrepare3Params, /* 1.1.0 */
+     .domainMigratePrepareTunnel3Params = remoteDomainMigratePrepareTunnel3Params, /* 1.1.0 */

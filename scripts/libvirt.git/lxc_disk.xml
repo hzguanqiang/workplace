@@ -1,0 +1,5 @@
+<disk type='block' device='disk'>
+    <driver type='raw' cache='none'/>
+    <source dev='/dev/loop5'/>
+    <target dev='sdf' bus='scsi'/>
+</disk>

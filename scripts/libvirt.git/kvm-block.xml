@@ -1,0 +1,30 @@
+<domain type='kvm'>
+    <name>kvm</name>
+    <memory unit='KiB'>1024000</memory>
+    <currentMemory unit='KiB'>1024000</currentMemory>
+    <vcpu placement='static'>1</vcpu>
+    <os>
+        <type arch='x86_64'>hvm</type>
+        <boot dev='hd'/>
+    </os>
+    <features>
+        <acpi/>
+        <apic/>
+    </features>
+    <clock offset='utc'>
+        <timer name='pit' tickpolicy='delay'/>
+        <timer name='rtc' tickpolicy='catchup'/>
+    </clock>
+    <on_poweroff>destroy</on_poweroff>
+    <on_reboot>restart</on_reboot>
+    <on_crash>destroy</on_crash>
+    <devices>
+        <emulator>/usr/bin/kvm</emulator>
+        <disk type='block' device='disk'>
+            <driver name='qemu' type='raw' cache='none'/>
+            <source dev='/dev/disk/by-path/ip-192.168.0.6:3260-iscsi-iqn.2010-10.org.openstack:volume-14d5639b-c5fc-497f-b635-be9f91719e34-lun-1'/>
+            <target dev='vda' bus='virtio'/>
+            <alias name='virtio-disk0'/>
+        </disk>
+    </devices>
+</domain>

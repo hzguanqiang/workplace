@@ -1,0 +1,867 @@
+commit 02b4c6e0d9e0d2589e682c6bc74dde4e7b709eb4
+Author: hzguanqiang <hzguanqiang@gmail.com>
+Date:   Sun Sep 29 14:50:56 2013 +0800
+
+    lxc: Add blkio throttle set
+
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index 8b13f84..ee7c63f 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -1547,6 +1547,22 @@ static int lxcStateCleanup(void)
+ }
+ 
+ 
++/* Which features are supported by this driver? */
++static int
++lxcConnectSupportsFeature(virConnectPtr conn, int feature)
++{
++    if (virConnectSupportsFeatureEnsureACL(conn) < 0)
++        return -1;
++
++    switch (feature) {
++        case VIR_DRV_FEATURE_TYPED_PARAM_STRING:
++            return 1;
++        default:
++            return 0;
++        }
++}
++
++
+ static int lxcConnectGetVersion(virConnectPtr conn, unsigned long *version)
+ {
+     struct utsname ver;
+@@ -1912,6 +1928,191 @@ lxcDomainGetSchedulerParameters(virDomainPtr domain,
+ }
+ 
+ 
++/* deviceIoTuneStr in the form of /device/path,ioTuneValue,/device/path,ioTuneValue or
++ * for example, /dev/disk/by-path/pci-0000:00:1f.2-scsi-0:0:0:0,800
++ * deviceIoTuneFiled represents the ioTune type to tune, including device weight,
++ * device read bps, device write bps, device read iops and device write iops.
++ */
++static int
++lxcDomainParseDeviceIoTuneInfoStr(char *deviceIoTuneStr,
++                                  const char *deviceIoTuneFiled,
++                                  virBlkioDeviceIoTuneInfoPtr *dio, size_t *size)
++{
++    char *temp;
++    int ndevices = 0;
++    int nsep = 0;
++    size_t i, j, k;
++    virBlkioDeviceIoTuneInfoPtr result = NULL;
++
++    if (STREQ(deviceIoTuneStr, ""))
++        return 0;
++
++    temp = deviceIoTuneStr;
++    while (temp) {
++        temp = strchr(temp, ',');
++        if (temp) {
++            temp++;
++            nsep++;
++        }
++    }
++
++    /* A valid string must have even number of fields, hence an odd
++     * number of commas.  */
++    if (!(nsep & 1))
++        goto error;
++
++    ndevices = (nsep + 1) / 2;
++
++    if (VIR_ALLOC_N(result, ndevices) < 0)
++        return -1;
++
++    for (i = 0; i < ndevices; i++)
++        memset(&result[i], 0, sizeof(result[i]));
++
++    i = 0;
++    temp = deviceIoTuneStr;
++    while (temp) {
++        char *p = temp;
++
++        /* device path */
++        p = strchr(p, ',');
++        if (!p)
++            goto error;
++
++        if (VIR_STRNDUP(result[i].path, temp, p - temp) < 0)
++            goto cleanup;
++
++        /* device ioTune value */
++        temp = p + 1;
++
++        if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_DEVICE_WEIGHT)) {
++            if (virStrToLong_ui(temp, &p, 10, &result[i].weight) < 0)
++                goto error;
++        } else if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS)) {
++            if (virStrToLong_ull(temp, &p, 10, &result[i].read_bps) < 0)
++                goto error;
++        } else if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS)) {
++            if (virStrToLong_ull(temp, &p, 10, &result[i].write_bps) < 0)
++                goto error;
++        } else if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS)) {
++            if (virStrToLong_ull(temp, &p, 10, &result[i].read_iops) < 0)
++                goto error;
++        } else if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS)) {
++            if (virStrToLong_ull(temp, &p, 10, &result[i].write_iops) < 0)
++                goto error;
++        }
++
++        i++;
++
++        if (*p == '\0')
++            break;
++        else if (*p != ',')
++            goto error;
++        temp = p + 1;
++    }
++
++    if (!i)
++        VIR_FREE(result);
++
++    for (j = 0; j < i; j++) {
++        bool found = false;
++        virBlkioDeviceIoTuneInfoPtr old, new;
++
++        new = &result[j];
++        for (k = 0; k < *size; k++) {
++            old = &(*dio)[k];
++            if (STREQ(new->path, old->path)) {
++                found = true;
++                if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_DEVICE_WEIGHT))
++                    old->weight = new->weight;
++                else if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS))
++                    old->read_bps = new->read_bps;
++                else if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS))
++                    old->write_bps = new->write_bps;
++                else if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS))
++                    old->read_iops = new->read_iops;
++                else if (STREQ(deviceIoTuneFiled, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS))
++                    old->write_iops = new->write_iops;
++                break;
++            }
++        }
++        if (!found) {
++            if (!new->weight && !new->read_bps && !new->write_bps &&
++                !new->read_iops && !new->write_iops)
++                continue;
++            if (VIR_EXPAND_N(*dio, *size, 1) < 0)
++                goto cleanup;
++            old = &(*dio)[*size -1];
++            if (VIR_STRDUP(old->path, new->path) < 0)
++                goto cleanup;
++            old->weight = new->weight;
++            old->read_bps = new->read_bps;
++            old->write_bps = new->write_bps;
++            old->read_iops = new->read_iops;
++            old->write_iops = new->write_iops;
++        }
++    }
++
++    virBlkioDeviceIoTuneInfoArrayClear(result, ndevices);
++    VIR_FREE(result);
++    return 0;
++
++error:
++    virReportError(VIR_ERR_INVALID_ARG,
++                   _("unable to parse device ioTune '%s'"), deviceIoTuneStr);
++cleanup:
++    virBlkioDeviceIoTuneInfoArrayClear(result, ndevices);
++    VIR_FREE(result);
++    return -1;
++}
++
++/* Modify dest_array to reflect all device Iotune info changes described in
++ * src_array.  */
++static int
++lxcDomainMergeDeviceIoTuneInfos(virBlkioDeviceIoTuneInfoPtr *dest_array,
++                                size_t *dest_size,
++                                virBlkioDeviceIoTuneInfoPtr src_array,
++                                size_t src_size)
++{
++    size_t i, j;
++    virBlkioDeviceIoTuneInfoPtr dest, src;
++
++    for (i = 0; i < src_size; i++) {
++        bool found = false;
++
++        src = &src_array[i];
++        for (j = 0; j < *dest_size; j++) {
++            dest = &(*dest_array)[j];
++            if (STREQ(src->path, dest->path)) {
++                found = true;
++                dest->weight = src->weight;
++                dest->read_bps = src->read_bps;
++                dest->write_bps = src->write_bps;
++                dest->read_iops = src->read_iops;
++                dest->write_iops = src->write_iops;
++                break;
++            }
++        }
++        if (!found) {
++            if (!src->weight && !src->read_bps && !src->write_bps &&
++                !src->read_iops && !src->write_iops)
++                continue;
++            if (VIR_EXPAND_N(*dest_array, *dest_size, 1) < 0)
++                return -1;
++            dest = &(*dest_array)[*dest_size - 1];
++            if (VIR_STRDUP(dest->path, src->path) < 0)
++                return -1;
++            dest->weight = src->weight;
++            dest->read_bps = src->read_bps;
++            dest->write_bps = src->write_bps;
++            dest->read_iops = src->read_iops;
++            dest->write_iops = src->write_iops;
++        }
++    }
++
++    return 0;
++}
++
+ static int
+ lxcDomainSetBlkioParameters(virDomainPtr dom,
+                             virTypedParameterPtr params,
+@@ -1932,6 +2133,16 @@ lxcDomainSetBlkioParameters(virDomainPtr dom,
+     if (virTypedParamsValidate(params, nparams,
+                                VIR_DOMAIN_BLKIO_WEIGHT,
+                                VIR_TYPED_PARAM_UINT,
++                               VIR_DOMAIN_BLKIO_DEVICE_WEIGHT,
++                               VIR_TYPED_PARAM_STRING,
++                               VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS,
++                               VIR_TYPED_PARAM_STRING,
++                               VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS,
++                               VIR_TYPED_PARAM_STRING,
++                               VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS,
++                               VIR_TYPED_PARAM_STRING,
++                               VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS,
++                               VIR_TYPED_PARAM_STRING,
+                                NULL) < 0)
+         return -1;
+ 
+@@ -1950,6 +2161,7 @@ lxcDomainSetBlkioParameters(virDomainPtr dom,
+                                         vm, &flags, &persistentDef) < 0)
+         goto cleanup;
+ 
++    ret = 0;
+     if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+         if (!virCgroupHasController(priv->cgroup, VIR_CGROUP_CONTROLLER_BLKIO)) {
+             virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+@@ -1959,42 +2171,227 @@ lxcDomainSetBlkioParameters(virDomainPtr dom,
+ 
+         for (i = 0; i < nparams; i++) {
+             virTypedParameterPtr param = &params[i];
++            size_t ndevices = 0;
++            virBlkioDeviceIoTuneInfoPtr devices = NULL;
++            size_t j;
++
++            if (lxcDomainMergeDeviceIoTuneInfos(&devices, &ndevices,
++                                                vm->def->blkio.devices,
++                                                vm->def->blkio.ndevices) < 0) {
++                ret = -1;
++                if (ndevices) {
++                    virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                    VIR_FREE(devices);
++                }
++                continue;
++            }
+ 
+             if (STREQ(param->field, VIR_DOMAIN_BLKIO_WEIGHT)) {
+                 if (params[i].value.ui > 1000 || params[i].value.ui < 100) {
+                     virReportError(VIR_ERR_INVALID_ARG, "%s",
+                                    _("out of blkio weight range."));
+-                    goto cleanup;
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
+                 }
+ 
+                 if (virCgroupSetBlkioWeight(priv->cgroup, params[i].value.ui) < 0)
+-                    goto cleanup;
++                    ret = -1;
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_DEVICE_WEIGHT)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                      VIR_DOMAIN_BLKIO_DEVICE_WEIGHT,
++                                                      &devices,
++                                                      &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                      VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS,
++                                                      &devices,
++                                                      &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                      VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS,
++                                                      &devices,
++                                                      &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                      VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS,
++                                                      &devices,
++                                                      &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                      VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS,
++                                                      &devices,
++                                                      &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
+             }
++
++            for (j = 0; j < ndevices; j++) {
++                if (virCgroupSetBlkioDeviceIoTune(priv->cgroup,
++                                                  devices[j].path, devices[j].weight,
++                                                  devices[j].read_bps, devices[j].write_bps,
++                                                  devices[j].read_iops, devices[j].write_iops) < 0) {
++                    ret = -1;
++                    break;
++                }
++            }
++            if (j != ndevices ||
++                lxcDomainMergeDeviceIoTuneInfos(&vm->def->blkio.devices,
++                                                &vm->def->blkio.ndevices,
++                                                devices, ndevices) < 0)
++                ret = -1;
++
++            virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++            VIR_FREE(devices);
+         }
+     }
++    if (ret < 0)
++        goto cleanup;
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         /* Clang can't see that if we get here, persistentDef was set.  */
+         sa_assert(persistentDef);
+ 
+         for (i = 0; i < nparams; i++) {
+             virTypedParameterPtr param = &params[i];
++            virBlkioDeviceIoTuneInfoPtr devices = NULL;
++            size_t ndevices = 0;
++
++            if (lxcDomainMergeDeviceIoTuneInfos(&devices, &ndevices,
++                                                 persistentDef->blkio.devices,
++                                                 persistentDef->blkio.ndevices) < 0) {
++                ret = -1;
++                if (ndevices) {
++                    virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                    VIR_FREE(devices);
++                }
++                continue;
++            }
++
+ 
+             if (STREQ(param->field, VIR_DOMAIN_BLKIO_WEIGHT)) {
+                 if (params[i].value.ui > 1000 || params[i].value.ui < 100) {
+                     virReportError(VIR_ERR_INVALID_ARG, "%s",
+                                    _("out of blkio weight range."));
+-                    goto cleanup;
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
+                 }
+ 
+                 persistentDef->blkio.weight = params[i].value.ui;
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_DEVICE_WEIGHT)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                       VIR_DOMAIN_BLKIO_DEVICE_WEIGHT,
++                                                       &devices,
++                                                       &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                       VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS,
++                                                       &devices,
++                                                       &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                       VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS,
++                                                       &devices,
++                                                       &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                       VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS,
++                                                       &devices,
++                                                       &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
++            } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS)) {
++                if (lxcDomainParseDeviceIoTuneInfoStr(params[i].value.s,
++                                                       VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS,
++                                                       &devices,
++                                                       &ndevices) < 0) {
++                    ret = -1;
++                    if (ndevices) {
++                        virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++                        VIR_FREE(devices);
++                    }
++                    continue;
++                }
+             }
++
++            if (lxcDomainMergeDeviceIoTuneInfos(&persistentDef->blkio.devices,
++                                                 &persistentDef->blkio.ndevices,
++                                                 devices, ndevices) < 0)
++                ret = -1;
++
++            virBlkioDeviceIoTuneInfoArrayClear(devices, ndevices);
++            VIR_FREE(devices);
+         }
+ 
+         if (virDomainSaveConfig(cfg->configDir, persistentDef) < 0)
+-            goto cleanup;
++            ret = -1;
+     }
+ 
+-    ret = 0;
+ cleanup:
+     if (vm)
+         virObjectUnlock(vm);
+@@ -2004,7 +2401,7 @@ cleanup:
+ }
+ 
+ 
+-#define LXC_NB_BLKIO_PARAM  1
++#define LXC_NB_BLKIO_PARAM  6
+ static int
+ lxcDomainGetBlkioParameters(virDomainPtr dom,
+                             virTypedParameterPtr params,
+@@ -2013,7 +2410,7 @@ lxcDomainGetBlkioParameters(virDomainPtr dom,
+ {
+     virLXCDriverPtr driver = dom->conn->privateData;
+     virCapsPtr caps = NULL;
+-    size_t i;
++    size_t i, j;
+     virDomainObjPtr vm = NULL;
+     virDomainDefPtr persistentDef = NULL;
+     unsigned int val;
+@@ -2021,10 +2418,11 @@ lxcDomainGetBlkioParameters(virDomainPtr dom,
+     virLXCDomainObjPrivatePtr priv;
+ 
+     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+-                  VIR_DOMAIN_AFFECT_CONFIG, -1);
++                  VIR_DOMAIN_AFFECT_CONFIG |
++                  VIR_TYPED_PARAM_STRING_OKAY, -1);
+ 
+     if (!(vm = lxcDomObjFromDomain(dom)))
+-        goto cleanup;
++        return -1;
+ 
+     priv = vm->privateData;
+ 
+@@ -2064,6 +2462,150 @@ lxcDomainGetBlkioParameters(virDomainPtr dom,
+                                             VIR_TYPED_PARAM_UINT, val) < 0)
+                     goto cleanup;
+                 break;
++            case 1: /* blkiotune.device_weight */
++                if (vm->def->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < vm->def->blkio.ndevices; j++) {
++                        if (!vm->def->blkio.devices[j].weight)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%u",
++                                          vm->def->blkio.devices[j].path,
++                                          vm->def->blkio.devices[j].weight);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (virTypedParameterAssign(param,
++                                            VIR_DOMAIN_BLKIO_DEVICE_WEIGHT,
++                                            VIR_TYPED_PARAM_STRING,
++                                            param->value.s) < 0)
++                    goto cleanup;
++                break;
++
++            case 2: /* blkiotune.throttle.device_read_bps */
++                if (vm->def->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < vm->def->blkio.ndevices; j++) {
++                        if (!vm->def->blkio.devices[j].read_bps)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%llu",
++                                          vm->def->blkio.devices[j].path,
++                                          vm->def->blkio.devices[j].read_bps);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (virTypedParameterAssign(param,
++                                            VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS,
++                                            VIR_TYPED_PARAM_STRING,
++                                            param->value.s) < 0)
++                    goto cleanup;
++                break;
++
++            case 3: /* blkiotune.throttle.device_write_bps */
++                if (vm->def->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < vm->def->blkio.ndevices; j++) {
++                        if (!vm->def->blkio.devices[j].write_bps)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%llu",
++                                          vm->def->blkio.devices[j].path,
++                                          vm->def->blkio.devices[j].write_bps);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (virTypedParameterAssign(param,
++                                            VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS,
++                                            VIR_TYPED_PARAM_STRING,
++                                            param->value.s) < 0)
++                    goto cleanup;
++                break;
++
++            case 4: /* blkiotune.throttle.device_read_iops */
++                if (vm->def->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < vm->def->blkio.ndevices; j++) {
++                        if (!vm->def->blkio.devices[j].read_iops)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%llu",
++                                          vm->def->blkio.devices[j].path,
++                                          vm->def->blkio.devices[j].read_iops);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (virTypedParameterAssign(param,
++                                            VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS,
++                                            VIR_TYPED_PARAM_STRING,
++                                            param->value.s) < 0)
++                    goto cleanup;
++                break;
++
++            case 5: /* blkiotune.throttle.device_write_iops */
++                if (vm->def->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < vm->def->blkio.ndevices; j++) {
++                        if (!vm->def->blkio.devices[j].write_iops)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%llu",
++                                          vm->def->blkio.devices[j].path,
++                                          vm->def->blkio.devices[j].write_iops);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (virTypedParameterAssign(param,
++                                            VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS,
++                                            VIR_TYPED_PARAM_STRING,
++                                            param->value.s) < 0)
++                    goto cleanup;
++                break;
+ 
+             /* coverity[dead_error_begin] */
+             default:
+@@ -2074,13 +2616,189 @@ lxcDomainGetBlkioParameters(virDomainPtr dom,
+     } else if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         for (i = 0; i < *nparams && i < LXC_NB_BLKIO_PARAM; i++) {
+             virTypedParameterPtr param = &params[i];
++            val = 0;
++            param->value.ui = 0;
++            param->type = VIR_TYPED_PARAM_UINT;
+ 
+             switch (i) {
+             case 0: /* fill blkio weight here */
+-                if (virTypedParameterAssign(param, VIR_DOMAIN_BLKIO_WEIGHT,
+-                                            VIR_TYPED_PARAM_UINT,
+-                                            persistentDef->blkio.weight) < 0)
++                if (virStrcpyStatic(param->field, VIR_DOMAIN_BLKIO_WEIGHT) == NULL) {
++                    virReportError(VIR_ERR_INTERNAL_ERROR,
++                                   _("Field name '%s' too long"),
++                                   VIR_DOMAIN_BLKIO_WEIGHT);
++                    goto cleanup;
++                }
++                param->value.ui = persistentDef->blkio.weight;
++                break;
++
++            case 1: /* blkiotune.device_weight */
++                if (persistentDef->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < persistentDef->blkio.ndevices; j++) {
++                        if (!persistentDef->blkio.devices[j].weight)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%u",
++                                          persistentDef->blkio.devices[j].path,
++                                          persistentDef->blkio.devices[j].weight);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (!param->value.s && VIR_STRDUP(param->value.s, "") < 0)
++                    goto cleanup;
++                param->type = VIR_TYPED_PARAM_STRING;
++                if (virStrcpyStatic(param->field,
++                                    VIR_DOMAIN_BLKIO_DEVICE_WEIGHT) == NULL) {
++                    virReportError(VIR_ERR_INTERNAL_ERROR,
++                                   _("Field name '%s' too long"),
++                                   VIR_DOMAIN_BLKIO_DEVICE_WEIGHT);
++                    goto cleanup;
++                }
++                break;
++
++            case 2: /* blkiotune.device_read_bps */
++                if (persistentDef->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < persistentDef->blkio.ndevices; j++) {
++                        if (!persistentDef->blkio.devices[j].read_bps)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%llu",
++                                          persistentDef->blkio.devices[j].path,
++                                          persistentDef->blkio.devices[j].read_bps);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (!param->value.s && VIR_STRDUP(param->value.s, "") < 0)
++                    goto cleanup;
++                param->type = VIR_TYPED_PARAM_STRING;
++                if (virStrcpyStatic(param->field,
++                                    VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS) == NULL) {
++                    virReportError(VIR_ERR_INTERNAL_ERROR,
++                                   _("Field name '%s' too long"),
++                                   VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_BPS);
+                     goto cleanup;
++                }
++                break;
++
++            case 3: /* blkiotune.device_write_bps */
++                if (persistentDef->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < persistentDef->blkio.ndevices; j++) {
++                        if (!persistentDef->blkio.devices[j].write_bps)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%llu",
++                                          persistentDef->blkio.devices[j].path,
++                                          persistentDef->blkio.devices[j].write_bps);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (!param->value.s && VIR_STRDUP(param->value.s, "") < 0)
++                    goto cleanup;
++                param->type = VIR_TYPED_PARAM_STRING;
++                if (virStrcpyStatic(param->field,
++                                    VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS) == NULL) {
++                    virReportError(VIR_ERR_INTERNAL_ERROR,
++                                   _("Field name '%s' too long"),
++                                   VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_BPS);
++                    goto cleanup;
++                }
++                break;
++
++            case 4: /* blkiotune.device_read_iops */
++                if (persistentDef->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < persistentDef->blkio.ndevices; j++) {
++                        if (!persistentDef->blkio.devices[j].read_iops)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%llu",
++                                          persistentDef->blkio.devices[j].path,
++                                          persistentDef->blkio.devices[j].read_iops);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (!param->value.s && VIR_STRDUP(param->value.s, "") < 0)
++                    goto cleanup;
++                param->type = VIR_TYPED_PARAM_STRING;
++                if (virStrcpyStatic(param->field,
++                                    VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS) == NULL) {
++                    virReportError(VIR_ERR_INTERNAL_ERROR,
++                                   _("Field name '%s' too long"),
++                                   VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_READ_IOPS);
++                    goto cleanup;
++                }
++                break;
++
++            case 5: /* blkiotune.device_write_iops */
++                if (persistentDef->blkio.ndevices > 0) {
++                    virBuffer buf = VIR_BUFFER_INITIALIZER;
++                    bool comma = false;
++
++                    for (j = 0; j < persistentDef->blkio.ndevices; j++) {
++                        if (!persistentDef->blkio.devices[j].write_iops)
++                            continue;
++                        if (comma)
++                            virBufferAddChar(&buf, ',');
++                        else
++                            comma = true;
++                        virBufferAsprintf(&buf, "%s,%llu",
++                                          persistentDef->blkio.devices[j].path,
++                                          persistentDef->blkio.devices[j].write_iops);
++                    }
++                    if (virBufferError(&buf)) {
++                        virReportOOMError();
++                        goto cleanup;
++                    }
++                    param->value.s = virBufferContentAndReset(&buf);
++                }
++                if (!param->value.s && VIR_STRDUP(param->value.s, "") < 0)
++                    goto cleanup;
++                param->type = VIR_TYPED_PARAM_STRING;
++                if (virStrcpyStatic(param->field,
++                                    VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS) == NULL) {
++                    virReportError(VIR_ERR_INTERNAL_ERROR,
++                                   _("Field name '%s' too long"),
++                                   VIR_DOMAIN_BLKIO_THROTTLE_DEVICE_WRITE_IOPS);
++                    goto cleanup;
++                }
+                 break;
+ 
+             /* coverity[dead_error_begin] */
+@@ -4624,6 +5342,7 @@ static virDriver lxcDriver = {
+     .name = LXC_DRIVER_NAME,
+     .connectOpen = lxcConnectOpen, /* 0.4.2 */
+     .connectClose = lxcConnectClose, /* 0.4.2 */
++    .connectSupportsFeature = lxcConnectSupportsFeature, /* 1.1.3 */
+     .connectGetVersion = lxcConnectGetVersion, /* 0.4.6 */
+     .connectGetHostname = lxcConnectGetHostname, /* 0.6.3 */
+     .connectGetSysinfo = lxcConnectGetSysinfo, /* 1.0.5 */

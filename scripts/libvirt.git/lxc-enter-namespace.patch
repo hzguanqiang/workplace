@@ -1,0 +1,415 @@
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 9497cc1..cbc0372 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -4642,6 +4642,44 @@ cleanup:
+ }
+ 
+ static int
++lxcDispatchDomainEnterNamespace(virNetServerPtr server ATTRIBUTE_UNUSED,
++                                virNetServerClientPtr client ATTRIBUTE_UNUSED,
++                                virNetMessagePtr msg ATTRIBUTE_UNUSED,
++                                virNetMessageErrorPtr rerr,
++                                lxc_domain_enter_namespace_args *args)
++{
++    int rv = -1;
++    struct daemonClientPrivate *priv =
++        virNetServerClientGetPrivateData(client);
++    virDomainPtr dom = NULL;
++
++    if (!priv->conn) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("connection not open"));
++        goto cleanup;
++    }
++
++    if (!(dom = get_nonnull_domain(priv->conn, args->dom)))
++        goto cleanup;
++
++    if (virDomainLxcEnterNamespace(dom,
++                                   args->fdlist.fdlist_len,
++                                   args->fdlist.fdlist_val,
++                                   &args->oldfdlist.oldfdlist_len,
++                                   &args->oldfdlist.oldfdlist_val,
++                                   args->flags) < 0)
++        goto cleanup;
++
++    rv = 0;
++
++cleanup:
++    if (rv < 0)
++        virNetMessageSaveError(rerr);
++    if (dom)
++        virDomainFree(dom);
++    return rv;
++}
++
++static int
+ remoteDispatchDomainGetJobStats(virNetServerPtr server ATTRIBUTE_UNUSED,
+                                 virNetServerClientPtr client,
+                                 virNetMessagePtr msg ATTRIBUTE_UNUSED,
+diff --git a/python/generator.py b/python/generator.py
+index 12c14f1..9a9d275 100755
+--- a/python/generator.py
++++ b/python/generator.py
+@@ -465,6 +465,7 @@ skip_impl = (
+ 
+ lxc_skip_impl = (
+     'virDomainLxcOpenNamespace',
++    "virDomainLxcEnterNamespace",
+ )
+ 
+ qemu_skip_impl = (
+@@ -564,7 +565,6 @@ skip_function = (
+ )
+ 
+ lxc_skip_function = (
+-  "virDomainLxcEnterNamespace",
+   "virDomainLxcEnterSecurityLabel",
+ )
+ qemu_skip_function = (
+diff --git a/python/libvirt-lxc-override-api.xml b/python/libvirt-lxc-override-api.xml
+index db0d45d..3bf5972 100644
+--- a/python/libvirt-lxc-override-api.xml
++++ b/python/libvirt-lxc-override-api.xml
+@@ -15,5 +15,19 @@ the setns() system call.]]></info>
+       <arg name='domain' type='virDomainPtr' info='a domain object'/>
+       <arg name='flags' type='unsigned int' info='currently unused, pass 0'/>
+     </function>
++    <function name='virDomainLxcEnterNamespace' file='python-lxc'>
++      <info><![CDATA[This API is LXC specific, so it will only work with hypervisor
++connections to the LXC driver.
++
++Attaches the process to the namespaces associated with the
++FDs in the list of file descriptors returned by
++virDomainLxcOpenNamespace
++
++Returns 0 on success, -1 on error]]></info>
++      <return type='int' info='0 on success, or -1 on error'/>
++      <arg name='domain' type='virDomainPtr' info='a domain object'/>
++      <arg name='fdlist' type='int *' info='list of namespace file descriptors'/>
++      <arg name='flags' type='unsigned int' info='currently unused, pass 0'/>
++    </function>
+   </symbols>
+ </api>
+diff --git a/python/libvirt-lxc-override.c b/python/libvirt-lxc-override.c
+index f76ff4b..b9323d1 100644
+--- a/python/libvirt-lxc-override.c
++++ b/python/libvirt-lxc-override.c
+@@ -102,6 +102,57 @@ error:
+     VIR_FREE(fdlist);
+     return VIR_PY_NONE;
+ }
++
++static PyObject *
++libvirt_lxc_virDomainLxcEnterNamespace(PyObject *self ATTRIBUTE_UNUSED,
++                                      PyObject *args) {
++    PyObject *py_retval;
++    virDomainPtr domain;
++    PyObject *pyobj_domain;
++    PyObject *py_fdlist;
++    int c_retval;
++    unsigned int nfdlist;
++    int *fdlist = NULL;
++    unsigned int *noldfdlist = NULL;
++    int **oldfdlist = NULL;
++    unsigned int flags;
++    size_t i;
++
++    if (!PyArg_ParseTuple(args, (char *)"OOi:virDomainLxcEnterNamespace",
++                          &pyobj_domain, &py_fdlist, &flags))
++        return NULL;
++    domain = (virDomainPtr) PyvirDomain_Get(pyobj_domain);
++
++    if (domain == NULL)
++        return VIR_PY_NONE;
++
++    if (PyList_Check(py_fdlist))
++        nfdlist = PyList_Size(py_fdlist);
++    else
++        return VIR_PY_NONE;
++
++    if(VIR_ALLOC_N_QUIET(fdlist, nfdlist) < 0)
++        return PyErr_NoMemory();
++
++    for(i = 0; i < nfdlist; i++) {
++        PyObject *pyobj_fd;
++        pyobj_fd = PyList_GetItem(py_fdlist, i);
++        fdlist[i] = PyInt_AsLong(pyobj_fd);
++    }
++
++    LIBVIRT_BEGIN_ALLOW_THREADS;
++    c_retval = virDomainLxcEnterNamespace(domain, nfdlist, fdlist, noldfdlist, oldfdlist, flags);
++    LIBVIRT_END_ALLOW_THREADS;
++
++    py_retval = PyInt_FromLong( (long) c_retval);
++
++    VIR_FREE(fdlist);
++    return py_retval;
++
++error:
++    VIR_FREE(fdlist);
++    return VIR_PY_NONE;
++}
+ /************************************************************************
+  *									*
+  *			The registration stuff				*
+@@ -110,6 +161,7 @@ error:
+ static PyMethodDef libvirtLxcMethods[] = {
+ #include "libvirt-lxc-export.c"
+     {(char *) "virDomainLxcOpenNamespace", libvirt_lxc_virDomainLxcOpenNamespace, METH_VARARGS, NULL},
++    {(char *) "virDomainLxcEnterNamespace", libvirt_lxc_virDomainLxcEnterNamespace, METH_VARARGS, NULL},
+     {NULL, NULL, 0, NULL}
+ };
+ 
+diff --git a/src/access/viraccessperm.c b/src/access/viraccessperm.c
+index d517c66..9f737e7 100644
+--- a/src/access/viraccessperm.c
++++ b/src/access/viraccessperm.c
+@@ -42,7 +42,7 @@ VIR_ENUM_IMPL(virAccessPermDomain,
+               "init_control", "inject_nmi", "send_input", "send_signal", "fs_trim",
+               "block_read", "block_write", "mem_read",
+               "open_graphics", "open_device", "screenshot",
+-              "open_namespace");
++              "open_namespace", "enter_namespace");
+ 
+ VIR_ENUM_IMPL(virAccessPermInterface,
+               VIR_ACCESS_PERM_INTERFACE_LAST,
+diff --git a/src/access/viraccessperm.h b/src/access/viraccessperm.h
+index fdc461b..0402e3f 100644
+--- a/src/access/viraccessperm.h
++++ b/src/access/viraccessperm.h
+@@ -289,6 +289,12 @@ typedef enum {
+      */
+     VIR_ACCESS_PERM_DOMAIN_OPEN_NAMESPACE,
+ 
++    /**
++     * @desc: Enter domain namespace
++     * @message: Entering domain namespaces requires authorization
++     */
++    VIR_ACCESS_PERM_DOMAIN_ENTER_NAMESPACE,
++
+     VIR_ACCESS_PERM_DOMAIN_LAST,
+ } virAccessPermDomain;
+ 
+diff --git a/src/driver.h b/src/driver.h
+index 8cd164a..8653a67 100644
+--- a/src/driver.h
++++ b/src/driver.h
+@@ -1067,6 +1067,14 @@ typedef int
+                                 int **fdlist,
+                                 unsigned int flags);
+ 
++typedef int
++(*virDrvDomainLxcEnterNamespace)(virDomainPtr domain,
++                                 unsigned int nfdlist,
++                                 int *fdlist,
++                                 unsigned int *noldfdlist,
++                                 int **oldfdlist,
++                                 unsigned int flags);
++
+ typedef char *
+ (*virDrvDomainMigrateBegin3Params)(virDomainPtr domain,
+                                    virTypedParameterPtr params,
+@@ -1332,6 +1340,7 @@ struct _virDriver {
+     virDrvDomainFSTrim domainFSTrim;
+     virDrvDomainSendProcessSignal domainSendProcessSignal;
+     virDrvDomainLxcOpenNamespace domainLxcOpenNamespace;
++    virDrvDomainLxcEnterNamespace domainLxcEnterNamespace;
+     virDrvDomainMigrateBegin3Params domainMigrateBegin3Params;
+     virDrvDomainMigratePrepare3Params domainMigratePrepare3Params;
+     virDrvDomainMigratePrepareTunnel3Params domainMigratePrepareTunnel3Params;
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index ee7c63f..dbb231f 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -5127,6 +5127,60 @@ cleanup:
+ }
+ 
+ 
++static int lxcDomainLxcEnterNamespace(virDomainPtr dom,
++                                      unsigned int nfdlist,
++                                      int *fdlist,
++                                      unsigned int *noldfdlist,
++                                      int **oldfdlist,
++                                      unsigned int flags)
++{
++    virDomainObjPtr vm;
++    size_t i;
++
++//    virCheckFlagsGoto(0, error);
++    virCheckFlags(0, -1);
++
++    if (!(vm = lxcDomObjFromDomain(dom)))
++        goto cleanup;
++
++    if (virDomainLxcEnterNamespaceEnsureACL(dom->conn, vm->def) < 0)
++        goto cleanup;
++/*
++    if (!virDomainObjIsActive(vm)) {
++        virReportError(VIR_ERR_OPERATION_INVALID,
++                       "%s", _("Domain is not running"));
++        goto cleanup;
++    }
++*/
++    if (noldfdlist && oldfdlist) {
++        size_t nfds;
++        if (virProcessGetNamespaces(getpid(),
++                                    &nfds,
++                                    oldfdlist) < 0)
++            goto cleanup;
++        *noldfdlist = nfds;
++    }
++
++    if (virProcessSetNamespaces(nfdlist, fdlist) < 0) {
++        if (oldfdlist && noldfdlist) {
++            for (i = 0; i < *noldfdlist; i++) {
++                VIR_FORCE_CLOSE((*oldfdlist)[i]);
++            }
++            VIR_FREE(*oldfdlist);
++            *noldfdlist = 0;
++        }
++        goto cleanup;
++    }
++
++    return 0;
++
++cleanup:
++    if (vm)
++        virObjectUnlock(vm);
++    return -1;
++}
++
++
+ static char *
+ lxcConnectGetSysinfo(virConnectPtr conn, unsigned int flags)
+ {
+@@ -5420,6 +5474,7 @@ static virDriver lxcDriver = {
+     .domainShutdownFlags = lxcDomainShutdownFlags, /* 1.0.1 */
+     .domainReboot = lxcDomainReboot, /* 1.0.1 */
+     .domainLxcOpenNamespace = lxcDomainLxcOpenNamespace, /* 1.0.2 */
++    .domainLxcEnterNamespace = lxcDomainLxcEnterNamespace, /* 1.1.3 */
+ };
+ 
+ static virStateDriver lxcStateDriver = {
+diff --git a/src/lxc_protocol-structs b/src/lxc_protocol-structs
+index eb54172..e1c758f 100644
+--- a/src/lxc_protocol-structs
++++ b/src/lxc_protocol-structs
+@@ -8,6 +8,19 @@ struct lxc_domain_open_namespace_args {
+         remote_nonnull_domain      dom;
+         u_int                      flags;
+ };
++struct lxc_domain_enter_namespace_args {
++        remote_nonnull_domain      dom;
++        struct {
++                u_int              fdlist_len;
++                int *              fdlist_val;
++        } fdlist;
++        struct {
++                u_int              oldfdlist_len;
++                int *              oldfdlist_val;
++        } oldfdlist;
++        u_int                      flags;
++};
+ enum lxc_procedure {
+         LXC_PROC_DOMAIN_OPEN_NAMESPACE = 1,
++        LXC_PROC_DOMAIN_ENTER_NAMESPACE = 2,
+ };
+diff --git a/src/remote/lxc_protocol.x b/src/remote/lxc_protocol.x
+index 1cde90e..5e2c0e7 100644
+--- a/src/remote/lxc_protocol.x
++++ b/src/remote/lxc_protocol.x
+@@ -30,6 +30,12 @@ struct lxc_domain_open_namespace_args {
+     remote_nonnull_domain dom;
+     unsigned int flags;
+ };
++struct lxc_domain_enter_namespace_args {
++    remote_nonnull_domain      dom;
++    int fdlist<REMOTE_DOMAIN_NS_FD_LIST_MAX>;
++    int oldfdlist<REMOTE_DOMAIN_NS_FD_LIST_MAX>;
++    u_int                      flags;
++};
+ 
+ 
+ /* Define the program number, protocol version and procedure numbers here. */
+@@ -65,7 +71,8 @@ enum lxc_procedure {
+     /**
+      * @generate: none
+      * @priority: low
+-     * @acl: domain:open_namespace
++     * @acl: domain:enter_namespace
+      */
+-    LXC_PROC_DOMAIN_OPEN_NAMESPACE = 1
++    LXC_PROC_DOMAIN_OPEN_NAMESPACE = 1,
++    LXC_PROC_DOMAIN_ENTER_NAMESPACE = 2
+ };
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 96ccb99..f9d6500 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -6110,6 +6110,43 @@ done:
+ }
+ 
+ static int
++remoteDomainLxcEnterNamespace(virDomainPtr domain,
++                              unsigned int nfdlist,
++                              int *fdlist,
++                              unsigned int *noldfdlist,
++                              int **oldfdlist,
++                              unsigned int flags)
++{
++    int rv = -1;
++    lxc_domain_enter_namespace_args args;
++    struct private_data *priv = domain->conn->privateData;
++
++    remoteDriverLock(priv);
++
++    make_nonnull_domain(&args.dom, domain);
++
++    args.fdlist.fdlist_len = nfdlist;
++    args.fdlist.fdlist_val = fdlist;
++    args.oldfdlist.oldfdlist_len = *noldfdlist;
++    args.oldfdlist.oldfdlist_val = *oldfdlist;
++    args.flags = flags;
++
++    if (callFull(domain->conn, priv, REMOTE_CALL_LXC,
++                 NULL, 0,
++                 NULL, NULL,
++                 LXC_PROC_DOMAIN_ENTER_NAMESPACE,
++                 (xdrproc_t) xdr_lxc_domain_enter_namespace_args, (char *) &args,
++                 (xdrproc_t) xdr_void, NULL) == -1)
++        goto done;
++
++    rv = 0;
++
++done:
++    remoteDriverUnlock(priv);
++    return rv;
++}
++
++static int
+ remoteDomainGetJobStats(virDomainPtr domain,
+                         int *type,
+                         virTypedParameterPtr *params,
+@@ -6989,6 +7026,7 @@ static virDriver remote_driver = {
+     .nodeGetCPUMap = remoteNodeGetCPUMap, /* 1.0.0 */
+     .domainFSTrim = remoteDomainFSTrim, /* 1.0.1 */
+     .domainLxcOpenNamespace = remoteDomainLxcOpenNamespace, /* 1.0.2 */
++    .domainLxcEnterNamespace = remoteDomainLxcEnterNamespace, /* 1.1.3 */
+     .domainMigrateBegin3Params = remoteDomainMigrateBegin3Params, /* 1.1.0 */
+     .domainMigratePrepare3Params = remoteDomainMigratePrepare3Params, /* 1.1.0 */
+     .domainMigratePrepareTunnel3Params = remoteDomainMigratePrepareTunnel3Params, /* 1.1.0 */
+diff --git a/src/remote/remote_protocol.x b/src/remote/remote_protocol.x
+index 8d17bad..618aa20 100644
+--- a/src/remote/remote_protocol.x
++++ b/src/remote/remote_protocol.x
+@@ -235,6 +235,9 @@ const REMOTE_DOMAIN_JOB_STATS_MAX = 16;
+ /* Upper limit on number of CPU models */
+ const REMOTE_CONNECT_CPU_MODELS_MAX = 8192;
+ 
++/* Upper limit on list of namespace fds */
++const REMOTE_DOMAIN_NS_FD_LIST_MAX = 20;
++
+ /* UUID.  VIR_UUID_BUFLEN definition comes from libvirt.h */
+ typedef opaque remote_uuid[VIR_UUID_BUFLEN];
+ 

@@ -1,0 +1,53 @@
+<domain type="kvm">
+  <uuid>15073835-fb84-4a06-bcf5-6596e6284ea2</uuid>
+  <name>test_16</name>
+  <memory unit="GiB">6</memory>
+  <vcpu cpuset="4-23">4</vcpu>
+  <cputune>
+    <shares>16384</shares>
+    <quota>100000</quota>
+    <period>100000</period>
+  </cputune>
+  <blkiotune>
+    <device>
+      <path>/dev/sda</path>
+      <weight>150</weight>
+    </device>
+  </blkiotune>
+  <os>
+    <type>hvm</type>
+    <boot dev="hd"/>
+  </os>
+  <features>
+    <acpi/>
+  </features>
+  <clock offset="utc">
+    <timer name="pit" tickpolicy="delay"/>
+    <timer name="rtc" tickpolicy="catchup"/>
+  </clock>
+  <cpu mode="host-model" match="exact"/>
+  <devices>
+    <disk type="file" device="disk">
+      <driver name="qemu" type="qcow2" cache="none"/>
+      <source file="/home/openstack/nova/instances/instance-000005e4/disk"/>
+      <target bus="virtio" dev="vda"/>
+    </disk>
+    <interface type="bridge">
+      <mac address="fa:16:3e:66:63:34"/>
+      <model type="virtio"/>
+      <source bridge="br100"/>
+      <filterref filter="nova-instance-instance-000005e4-fa163e666334">
+        <parameter name="IP" value="10.120.34.77"/>
+        <parameter name="DHCPSERVER" value="10.120.34.45"/>
+        <parameter name="PROJNET" value="10.120.34.0"/>
+        <parameter name="PROJMASK" value="255.255.255.128"/>
+      </filterref>
+    </interface>
+    <serial type="file">
+      <source path="/home/openstack/nova/instances/instance-000005e4/console.log"/>
+    </serial>
+    <serial type="pty"/>
+    <input type="tablet" bus="usb"/>
+    <graphics type="vnc" autoport="yes" keymap="en-us" listen="114.113.199.5"/>
+  </devices>
+</domain>

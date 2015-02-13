@@ -1,0 +1,18 @@
+#!/bin/sh
+
+dohelp() {
+       echo "syntax: $0 TO-ADDR REV-LIST"
+}
+
+if [ -z "$2" ]; then
+   dohelp;
+   exit 1
+fi
+
+TO=$1
+REV=$2
+shift
+shift
+
+git send-email --cover-letter --annotate --to "$TO" --smtp-debug=1 --smtp-server=smtp.gmail.com --no-chain-reply-to $REV "$@"
+
