@@ -1,0 +1,29 @@
+<domain type='qemu'>
+    <name>kvm</name>
+    <memory unit='KiB'>512000</memory>
+    <currentMemory unit='KiB'>512000</currentMemory>
+    <vcpu placement='static'>1</vcpu>
+    <os>
+        <type arch='x86_64'>hvm</type>
+        <boot dev='hd'/>
+    </os>
+    <features>
+        <acpi/>
+        <apic/>
+    </features>
+    <clock offset='utc'>
+        <timer name='pit' tickpolicy='delay'/>
+        <timer name='rtc' tickpolicy='catchup'/>
+    </clock>
+    <on_poweroff>destroy</on_poweroff>
+    <on_reboot>restart</on_reboot>
+    <on_crash>destroy</on_crash>
+    <devices>
+        <emulator>/usr/bin/qemu-system-x86_64</emulator>
+        <disk type='file' device='disk'>
+            <driver name='qemu' type='qcow2' cache='none'/>
+            <source file='/tmp/cirros-0.3.0-x86_64-disk.img'/>
+            <target dev='vda' bus='virtio'/>
+        </disk>
+    </devices>
+</domain>

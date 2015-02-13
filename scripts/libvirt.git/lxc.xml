@@ -1,0 +1,34 @@
+<domain type='lxc' id='1902'>
+    <name>lxc</name>
+    <memory unit='KiB'>419404</memory>
+    <currentMemory unit='KiB'>419404</currentMemory>
+    <vcpu placement='static'>1</vcpu>
+    <resource>
+        <partition>/machine</partition>
+    </resource>
+    <os>
+        <type arch='x86_64'>exe</type>
+        <init>/sbin/init</init>
+        <cmdline>console=tty0 console=ttyS0</cmdline>
+    </os>
+    <clock offset='utc'/>
+    <on_poweroff>destroy</on_poweroff>
+    <on_reboot>restart</on_reboot>
+    <on_crash>destroy</on_crash>
+    <devices>
+        <emulator>/usr/lib/libvirt/libvirt_lxc</emulator>
+        <filesystem type='mount' accessmode='passthrough'>
+            <source dir='/root/images/rootfs'/>
+            <target dir='/'/>
+        </filesystem>
+        <console type='pty' tty='/dev/pts/2'>
+            <source path='/dev/pts/2'/>
+            <target type='lxc' port='0'/>
+            <alias name='console0'/>
+        </console>
+    <interface type="bridge">
+      <source bridge="br0"/>
+    </interface>
+    </devices>
+    <seclabel type='none'/>
+</domain>

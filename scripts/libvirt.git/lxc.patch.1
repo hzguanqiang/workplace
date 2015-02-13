@@ -1,0 +1,208 @@
+commit 302d345c110c9ac22b04d07a8c7197e7f9fcb633
+Author: Guan Qiang <hzguanqiang@gmail.com>
+Date:   Mon Sep 2 08:09:36 2013 +0000
+
+    Add implemention of virDomainLxcEnterNamespace to LXC driver & Python Library
+    
+    Add virDomainLxcEnterNamespace function into lxc driver and expose the API to
+    libvirt_lxc python library.
+
+diff --git a/python/generator.py b/python/generator.py
+index fb321c6..96e5307 100755
+--- a/python/generator.py
++++ b/python/generator.py
+@@ -464,6 +464,7 @@ skip_impl = (
+ 
+ lxc_skip_impl = (
+     'virDomainLxcOpenNamespace',
++    "virDomainLxcEnterNamespace",
+ )
+ 
+ qemu_skip_impl = (
+@@ -563,7 +564,6 @@ skip_function = (
+ )
+ 
+ lxc_skip_function = (
+-  "virDomainLxcEnterNamespace",
+   "virDomainLxcEnterSecurityLabel",
+ )
+ qemu_skip_function = (
+diff --git a/python/libvirt-lxc-override-api.xml b/python/libvirt-lxc-override-api.xml
+index db0d45d..3bf5972 100644
+--- a/python/libvirt-lxc-override-api.xml
++++ b/python/libvirt-lxc-override-api.xml
+@@ -15,5 +15,19 @@ the setns() system call.]]></info>
+       <arg name='domain' type='virDomainPtr' info='a domain object'/>
+       <arg name='flags' type='unsigned int' info='currently unused, pass 0'/>
+     </function>
++    <function name='virDomainLxcEnterNamespace' file='python-lxc'>
++      <info><![CDATA[This API is LXC specific, so it will only work with hypervisor
++connections to the LXC driver.
++
++Attaches the process to the namespaces associated with the
++FDs in the list of file descriptors returned by
++virDomainLxcOpenNamespace
++
++Returns 0 on success, -1 on error]]></info>
++      <return type='int' info='0 on success, or -1 on error'/>
++      <arg name='domain' type='virDomainPtr' info='a domain object'/>
++      <arg name='fdlist' type='int *' info='list of namespace file descriptors'/>
++      <arg name='flags' type='unsigned int' info='currently unused, pass 0'/>
++    </function>
+   </symbols>
+ </api>
+diff --git a/python/libvirt-lxc-override.c b/python/libvirt-lxc-override.c
+index fa7e963..9473c5c 100644
+--- a/python/libvirt-lxc-override.c
++++ b/python/libvirt-lxc-override.c
+@@ -101,6 +101,57 @@ error:
+     VIR_FREE(fdlist);
+     return VIR_PY_NONE;
+ }
++
++static PyObject *
++libvirt_lxc_virDomainLxcEnterNamespace(PyObject *self ATTRIBUTE_UNUSED,
++                                      PyObject *args) {
++    PyObject *py_retval;
++    virDomainPtr domain;
++    PyObject *pyobj_domain;
++    PyObject *py_fdlist;
++    int c_retval;
++    unsigned int nfdlist;
++    int *fdlist = NULL;
++    unsigned int *noldfdlist = NULL;
++    int **oldfdlist = NULL;
++    unsigned int flags;
++    size_t i;
++
++    if (!PyArg_ParseTuple(args, (char *)"OOi:virDomainLxcEnterNamespace",
++                          &pyobj_domain, &py_fdlist, &flags))
++        return NULL;
++    domain = (virDomainPtr) PyvirDomain_Get(pyobj_domain);
++
++    if (domain == NULL)
++        return VIR_PY_NONE;
++
++    if (PyList_Check(py_fdlist))
++        nfdlist = PyList_Size(py_fdlist);
++    else
++        return VIR_PY_NONE;
++
++    if(VIR_ALLOC_N_QUIET(fdlist, nfdlist) < 0)
++        return PyErr_NoMemory();
++
++    for(i = 0; i < nfdlist; i++) {
++        PyObject *pyobj_fd;
++        pyobj_fd = PyList_GetItem(py_fdlist, i);
++        fdlist[i] = PyInt_AsLong(pyobj_fd);
++    }
++
++    LIBVIRT_BEGIN_ALLOW_THREADS;
++    c_retval = virDomainLxcEnterNamespace(domain, nfdlist, fdlist, noldfdlist, oldfdlist, flags);
++    LIBVIRT_END_ALLOW_THREADS;
++
++    py_retval = PyInt_FromLong( (long) c_retval);
++
++    VIR_FREE(fdlist);
++    return py_retval;
++
++error:
++    VIR_FREE(fdlist);
++    return VIR_PY_NONE;
++}
+ /************************************************************************
+  *									*
+  *			The registration stuff				*
+@@ -109,6 +160,7 @@ error:
+ static PyMethodDef libvirtLxcMethods[] = {
+ #include "libvirt-lxc-export.c"
+     {(char *) "virDomainLxcOpenNamespace", libvirt_lxc_virDomainLxcOpenNamespace, METH_VARARGS, NULL},
++    {(char *) "virDomainLxcEnterNamespace", libvirt_lxc_virDomainLxcEnterNamespace, METH_VARARGS, NULL},
+     {NULL, NULL, 0, NULL}
+ };
+ 
+diff --git a/src/driver.h b/src/driver.h
+index be64333..32e5979 100644
+--- a/src/driver.h
++++ b/src/driver.h
+@@ -1061,6 +1061,14 @@ typedef int
+                                 int **fdlist,
+                                 unsigned int flags);
+ 
++typedef int
++(*virDrvDomainLxcEnterNamespace)(virDomainPtr domain,
++                                 unsigned int nfdlist,
++                                 int *fdlist,
++                                 unsigned int *noldfdlist,
++                                 int **oldfdlist,
++                                 unsigned int flags);
++
+ typedef char *
+ (*virDrvDomainMigrateBegin3Params)(virDomainPtr domain,
+                                    virTypedParameterPtr params,
+@@ -1326,6 +1334,7 @@ struct _virDriver {
+     virDrvDomainFSTrim domainFSTrim;
+     virDrvDomainSendProcessSignal domainSendProcessSignal;
+     virDrvDomainLxcOpenNamespace domainLxcOpenNamespace;
++    virDrvDomainLxcEnterNamespace domainLxcEnterNamespace;
+     virDrvDomainMigrateBegin3Params domainMigrateBegin3Params;
+     virDrvDomainMigratePrepare3Params domainMigratePrepare3Params;
+     virDrvDomainMigratePrepareTunnel3Params domainMigratePrepareTunnel3Params;
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index 9cb95ff..573ead7 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -4449,6 +4449,45 @@ cleanup:
+ }
+ 
+ 
++static int lxcDomainLxcEnterNamespace(virDomainPtr domain,
++                                      unsigned int nfdlist,
++                                      int *fdlist,
++                                      unsigned int *noldfdlist,
++                                      int **oldfdlist,
++                                      unsigned int flags)
++{
++    size_t i;
++
++    virCheckFlagsGoto(0, error);
++
++    if (noldfdlist && oldfdlist) {
++        size_t nfds;
++        if (virProcessGetNamespaces(getpid(),
++                                    &nfds,
++                                    oldfdlist) < 0)
++            goto error;
++        *noldfdlist = nfds;
++    }
++
++    if (virProcessSetNamespaces(nfdlist, fdlist) < 0) {
++        if (oldfdlist && noldfdlist) {
++            for (i = 0; i < *noldfdlist; i++) {
++                VIR_FORCE_CLOSE((*oldfdlist)[i]);
++            }
++            VIR_FREE(*oldfdlist);
++            *noldfdlist = 0;
++        }
++        goto error;
++    }
++
++    return 0;
++
++error:
++    virDispatchError(domain->conn);
++    return -1;
++}
++
++
+ static char *
+ lxcConnectGetSysinfo(virConnectPtr conn, unsigned int flags)
+ {
+@@ -4671,6 +4710,7 @@ static virDriver lxcDriver = {
+     .domainShutdownFlags = lxcDomainShutdownFlags, /* 1.0.1 */
+     .domainReboot = lxcDomainReboot, /* 1.0.1 */
+     .domainLxcOpenNamespace = lxcDomainLxcOpenNamespace, /* 1.0.2 */
++    .domainLxcEnterNamespace = lxcDomainLxcEnterNamespace, /* 1.1.3 */
+ };
+ 
+ static virStateDriver lxcStateDriver = {
