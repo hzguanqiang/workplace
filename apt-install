@@ -1,3 +1,2 @@
-sudo aptitude install libvirt-bin python-libvirt vim git exuberant-ctags zsh tmux git-review ipython tsocks python-pip python-dev
-sudo aptitude install libxml2-dev  libxslt-dev
+sudo aptitude install libvirt-bin python-libvirt vim git exuberant-ctags zsh tmux git-review ipython tsocks python-pip python-dev libxml2-dev  libxslt-dev libffi-dev  libmysqlclient-dev  python-dev  python-tox  libpq-dev libxml2-dev  libxslt-dev
 sudo pip install shadowsocks gevent 

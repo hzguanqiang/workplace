@@ -1,0 +1,41 @@
+[user]
+    email = hzguanqiang@gmail.com
+    name = Guan Qiang
+[gitreview]
+    username = hzguanqiang
+
+[alias]
+    a = add
+    b = branch
+    bl = blame
+    cm = commit
+    ca = commit -a
+    co = checkout
+    cl = clean
+    cp = cherry-pick
+    d = diff
+    f = fetch
+    m = merge
+    mt = mergetool
+    p = pull
+    r = remote
+    rb = rebase
+    rl = reflog
+    rp = rev-parse
+    rst = reset
+    rv = revert
+    st = status
+    sm = submodule
+
+    l = log --graph --decorate --pretty=oneline --abbrev-commit
+    la = log --graph --decorate --pretty=oneline --abbrev-commit --all
+    hist = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+
+[color]
+    branch = auto
+    diff = auto
+    interactive =auto
+    status = auto
+
+[push]
+    default = current
